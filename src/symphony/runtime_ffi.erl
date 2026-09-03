@@ -2,7 +2,7 @@
 -export([parse_yaml/1, absolute_path/1, dirname/1, join/2, home/0, temp_dir/0,
          getenv/1, hash_suffix/1, mkdir/1, is_directory/1, remove_tree/1,
          run_hook/3, now_ms/0, parse_rfc3339/1, sleep/1,
-         start_port/2, port_pid/1, port_send/2, port_read/2, port_stop/1, halt/1]).
+         start_port/3, port_pid/1, port_send/2, port_read/2, port_stop/1, halt/1]).
 
 parse_yaml(Source) ->
     try yamerl_constr:string(Source) of
@@ -33,7 +33,19 @@ yaml_key(Key) when is_list(Key) -> unicode:characters_to_binary(Key);
 yaml_key(Key) when is_atom(Key) -> atom_to_binary(Key, utf8);
 yaml_key(Key) -> iolist_to_binary(io_lib:format("~p", [Key])).
 
-absolute_path(Path) -> unicode:characters_to_binary(filename:absname(binary_to_list(Path))).
+absolute_path(Path) ->
+    Absolute = filename:absname(binary_to_list(Path)),
+    unicode:characters_to_binary(filename:join(lists:reverse(lists:foldl(
+        fun
+            (".", Parts) -> Parts;
+            ("..", [Root]) -> [Root];
+            ("..", [_Part | Rest]) -> Rest;
+            ("..", Parts) -> Parts;
+            (Part, Parts) -> [Part | Parts]
+        end,
+        [],
+        filename:split(Absolute)
+    )))).
 dirname(Path) -> unicode:characters_to_binary(filename:dirname(binary_to_list(Path))).
 join(A, B) -> unicode:characters_to_binary(filename:join(binary_to_list(A), binary_to_list(B))).
 home() -> unicode:characters_to_binary(os:getenv("HOME", "" )).
@@ -63,14 +75,15 @@ remove_tree(Path) ->
 run_hook(Script, Cwd, Timeout) ->
     Port = open_port({spawn_executable, "/bin/sh"}, [binary, exit_status, use_stdio,
         {args, ["-lc", binary_to_list(Script)]}, {cd, binary_to_list(Cwd)}]),
-    collect_hook(Port, Timeout, <<>>).
+    collect_hook(Port, erlang:monotonic_time(millisecond) + Timeout, <<>>).
 
-collect_hook(Port, Timeout, Output) ->
+collect_hook(Port, Deadline, Output) ->
+    Remaining = erlang:max(Deadline - erlang:monotonic_time(millisecond), 0),
     receive
-        {Port, {data, Data}} -> collect_hook(Port, Timeout, truncate(<<Output/binary, Data/binary>>));
+        {Port, {data, Data}} -> collect_hook(Port, Deadline, truncate(<<Output/binary, Data/binary>>));
         {Port, {exit_status, 0}} -> {ok, Output};
         {Port, {exit_status, Status}} -> {error, iolist_to_binary(io_lib:format("exit=~p output=~s", [Status, Output]))}
-    after Timeout ->
+    after Remaining ->
         safe_port_close(Port),
         {error, <<"hook timed out">>}
     end.
@@ -88,9 +101,11 @@ parse_rfc3339(Value) ->
 
 sleep(Milliseconds) -> timer:sleep(Milliseconds).
 
-start_port(Command, Cwd) ->
+start_port(Command, Cwd, ExcludedEnvironmentNames) ->
+    Environment = [{binary_to_list(Name), false} || Name <- ExcludedEnvironmentNames],
     try open_port({spawn_executable, "/bin/bash"}, [binary, exit_status, use_stdio,
-            {line, 10485760}, {args, ["-lc", binary_to_list(Command)]}, {cd, binary_to_list(Cwd)}]) of
+            {line, 10485760}, {args, ["-lc", binary_to_list(Command)]},
+            {cd, binary_to_list(Cwd)}, {env, Environment}]) of
         Port -> {ok, Port}
     catch Class:Reason -> {error, iolist_to_binary(io_lib:format("~p: ~p", [Class, Reason]))}
     end.

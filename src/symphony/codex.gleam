@@ -1,6 +1,7 @@
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -39,6 +40,7 @@ pub type Session {
 pub fn start(
   config: CodexConfig,
   cwd: String,
+  secret_environment_names: List(String),
 ) -> Result(Session, domain.ServiceError) {
   let CodexConfig(
     command:,
@@ -48,60 +50,66 @@ pub fn start(
     ..,
   ) = config
   use port <- result.try(
-    runtime.start_port(command, cwd)
+    runtime.start_port(command, cwd, secret_environment_names)
     |> result.map_error(fn(message) { CodexError("codex_not_found", message) }),
   )
   let pid = runtime.port_pid(port)
-  let initialize =
-    json.object([
-      #("method", json.string("initialize")),
-      #("id", json.int(0)),
-      #(
-        "params",
-        json.object([
-          #(
-            "clientInfo",
-            json.object([
-              #("name", json.string("symphony_gleam")),
-              #("title", json.string("Symphony Gleam")),
-              #("version", json.string("0.1.0")),
-            ]),
-          ),
-        ]),
-      ),
-    ])
-  use _ <- result.try(send(port, initialize))
-  use _ <- result.try(wait_response(port, 0, read_timeout_ms))
-  use _ <- result.try(send(
-    port,
-    json.object([
-      #("method", json.string("initialized")),
-      #("params", json.object([])),
-    ]),
-  ))
-  let thread_start =
-    json.object([
-      #("method", json.string("thread/start")),
-      #("id", json.int(1)),
-      #(
-        "params",
-        json.object([
-          #("cwd", json.string(cwd)),
-          #("approvalPolicy", dynamic_json(approval_policy)),
-          #("sandbox", json.string(thread_sandbox)),
-          #("ephemeral", json.bool(True)),
-        ]),
-      ),
-    ])
-  use _ <- result.try(send(port, thread_start))
-  use response <- result.try(wait_response(port, 1, read_timeout_ms))
-  use thread_id <- result.try(
+  let started = {
+    let initialize =
+      json.object([
+        #("method", json.string("initialize")),
+        #("id", json.int(0)),
+        #(
+          "params",
+          json.object([
+            #(
+              "clientInfo",
+              json.object([
+                #("name", json.string("symphony_gleam")),
+                #("title", json.string("Symphony Gleam")),
+                #("version", json.string("0.1.0")),
+              ]),
+            ),
+          ]),
+        ),
+      ])
+    use _ <- result.try(send(port, initialize))
+    use _ <- result.try(wait_response(port, 0, read_timeout_ms))
+    use _ <- result.try(send(
+      port,
+      json.object([
+        #("method", json.string("initialized")),
+        #("params", json.object([])),
+      ]),
+    ))
+    let thread_start =
+      json.object([
+        #("method", json.string("thread/start")),
+        #("id", json.int(1)),
+        #(
+          "params",
+          json.object([
+            #("cwd", json.string(cwd)),
+            #("approvalPolicy", dynamic_json(approval_policy)),
+            #("sandbox", json.string(thread_sandbox)),
+            #("ephemeral", json.bool(True)),
+          ]),
+        ),
+      ])
+    use _ <- result.try(send(port, thread_start))
+    use response <- result.try(wait_response(port, 1, read_timeout_ms))
     string_at(response, ["thread", "id"])
     |> result.map_error(fn(_) {
       CodexError("response_error", "thread/start response has no thread id")
-    }),
-  )
-  Ok(Session(port, thread_id, pid, 2, config, cwd))
+    })
+  }
+  case started {
+    Ok(thread_id) -> Ok(Session(port, thread_id, pid, 2, config, cwd))
+    Error(error) -> {
+      runtime.port_stop(port)
+      Error(error)
+    }
+  }
 }
 
 pub fn run_turn(
@@ -218,8 +226,7 @@ fn stream_turn(
       }
     }
     Ok("item/commandExecution/requestApproval")
-    | Ok("item/fileChange/requestApproval")
-    | Ok("item/permissions/requestApproval") -> {
+    | Ok("item/fileChange/requestApproval") -> {
       use _ <- result.try(reply_decision(port, message, "decline"))
       on_event(AgentEvent(
         "approval_declined",
@@ -231,6 +238,23 @@ fn stream_turn(
         "safe default policy",
       ))
       stream_turn(port, session_id, pid, timeout_ms, on_event)
+    }
+    Ok("item/permissions/requestApproval") -> {
+      use _ <- result.try(reply_error(
+        port,
+        message,
+        "additional permissions are not supported by this service",
+      ))
+      on_event(AgentEvent(
+        "approval_declined",
+        runtime.now_ms(),
+        Some(session_id),
+        pid,
+        None,
+        None,
+        "permission request declined",
+      ))
+      Error(CodexError("turn_failed", "agent requested additional permissions"))
     }
     Ok("item/tool/requestUserInput") -> {
       let _ =
@@ -319,8 +343,17 @@ fn wait_response(
   id: Int,
   timeout_ms: Int,
 ) -> Result(Dynamic, domain.ServiceError) {
+  wait_response_until(port, id, runtime.now_ms() + timeout_ms)
+}
+
+fn wait_response_until(
+  port: runtime.Port,
+  id: Int,
+  deadline_ms: Int,
+) -> Result(Dynamic, domain.ServiceError) {
+  let remaining_ms = int.max(0, deadline_ms - runtime.now_ms())
   use line <- result.try(
-    runtime.port_read(port, timeout_ms)
+    runtime.port_read(port, remaining_ms)
     |> result.map_error(fn(message) { CodexError("response_timeout", message) }),
   )
   use message <- result.try(parse_message(line))
@@ -334,7 +367,7 @@ fn wait_response(
         _, Ok(error) -> Error(CodexError("response_error", error))
         _, _ -> Error(CodexError("response_error", "malformed response"))
       }
-    _ -> wait_response(port, id, timeout_ms)
+    _ -> wait_response_until(port, id, deadline_ms)
   }
 }
 

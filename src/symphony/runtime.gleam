@@ -52,7 +52,11 @@ pub fn parse_rfc3339(value: String) -> Result(Int, Nil)
 pub fn sleep(milliseconds: Int) -> Nil
 
 @external(erlang, "runtime_ffi", "start_port")
-pub fn start_port(command: String, cwd: String) -> Result(Port, String)
+pub fn start_port(
+  command: String,
+  cwd: String,
+  excluded_environment_names: List(String),
+) -> Result(Port, String)
 
 @external(erlang, "runtime_ffi", "port_pid")
 pub fn port_pid(port: Port) -> String

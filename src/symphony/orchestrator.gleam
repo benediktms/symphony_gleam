@@ -9,7 +9,7 @@ import gleam/order.{Eq, Gt, Lt}
 import gleam/result
 import gleam/set.{type Set}
 import gleam/string
-import symphony/codex.{type AgentEvent, AgentEvent, Usage}
+import symphony/codex.{type AgentEvent, type Usage, AgentEvent, Usage}
 import symphony/config
 import symphony/domain.{
   type AgentConfig, type Config, type Issue, type ServiceError,
@@ -190,16 +190,7 @@ fn startup_cleanup(state: State) -> State {
       state
     }
     Ok(issues) -> {
-      list.each(issues, fn(issue) {
-        case workspace.remove(state.config, issue.identifier) {
-          Ok(_) -> log_issue(issue, "workspace_cleanup completed")
-          Error(error) ->
-            log_issue(
-              issue,
-              "workspace_cleanup failed reason=" <> string.inspect(error),
-            )
-        }
-      })
+      list.each(issues, fn(issue) { cleanup_workspace(state.config, issue) })
       state
     }
   }
@@ -228,6 +219,7 @@ fn reconcile(state: State) -> State {
         Ok(running) -> {
           process.kill(running.pid)
           log_issue(running.issue, "worker_stalled retrying=true")
+          run_cancelled_after_run(state.config, running.issue)
           state
           |> finish_running(id)
           |> schedule_retry(
@@ -336,6 +328,7 @@ fn stop_and_release(
   reason: String,
 ) -> State {
   process.kill(running.pid)
+  run_cancelled_after_run(state.config, running.issue)
   let state = finish_running(state, running.issue.id)
   let state =
     State(
@@ -344,10 +337,7 @@ fn stop_and_release(
       retrying: dict.delete(state.retrying, running.issue.id),
     )
   case cleanup {
-    True -> {
-      let _ = workspace.remove(state.config, running.issue.identifier)
-      Nil
-    }
+    True -> cleanup_workspace(state.config, running.issue)
     False -> Nil
   }
   log_issue(running.issue, "worker_stopped reason=" <> reason)
@@ -411,7 +401,11 @@ fn run_attempt(
       issue,
       attempt,
     ))
-    use session <- result.try(codex.start(config.codex, work.path))
+    use session <- result.try(codex.start(
+      config.codex,
+      work.path,
+      tracker.secret_environment_names,
+    ))
     let outcome =
       run_turns(session, issue, first_prompt, 1, config, tracker, messages)
     codex.stop(session)
@@ -531,14 +525,23 @@ fn handle_agent_update(
         Some(Usage(new_input, new_output, new_total)) -> {
           let Totals(all_input, all_output, all_total, runtime_ms) =
             state.totals
+          let Usage(delta_input, delta_output, delta_total) =
+            usage_delta(
+              Usage(
+                running.input_tokens,
+                running.output_tokens,
+                running.total_tokens,
+              ),
+              Usage(new_input, new_output, new_total),
+            )
           #(
             new_input,
             new_output,
             new_total,
             Totals(
-              all_input + int.max(0, new_input - running.input_tokens),
-              all_output + int.max(0, new_output - running.output_tokens),
-              all_total + int.max(0, new_total - running.total_tokens),
+              all_input + delta_input,
+              all_output + delta_output,
+              all_total + delta_total,
               runtime_ms,
             ),
           )
@@ -654,7 +657,7 @@ fn handle_retry(state: State, entry: RetryEntry) -> State {
     Ok([issue, ..]) ->
       case is_terminal(issue, state.config.tracker) {
         True -> {
-          let _ = workspace.remove(state.config, issue.identifier)
+          cleanup_workspace(state.config, issue)
           release(state, issue.id)
         }
         False ->
@@ -795,6 +798,16 @@ pub fn retry_delay(attempt: Int, cap: Int) -> Int {
   retry_delay_loop(attempt, 10_000, cap)
 }
 
+pub fn usage_delta(previous: Usage, current: Usage) -> Usage {
+  let Usage(previous_input, previous_output, previous_total) = previous
+  let Usage(current_input, current_output, current_total) = current
+  Usage(
+    int.max(0, current_input - previous_input),
+    int.max(0, current_output - previous_output),
+    int.max(0, current_total - previous_total),
+  )
+}
+
 fn retry_delay_loop(attempt: Int, current: Int, cap: Int) -> Int {
   case attempt <= 1 || current >= cap {
     True -> int.min(current, cap)
@@ -826,4 +839,33 @@ fn log_issue(issue: Issue, message: String) -> Nil {
     <> " "
     <> message,
   )
+}
+
+fn run_cancelled_after_run(config: Config, issue: Issue) -> Nil {
+  case workspace.after_run_for_issue(config, issue.identifier) {
+    Ok(_) -> Nil
+    Error(error) ->
+      log_issue(
+        issue,
+        "after_run failed ignored=true reason=" <> string.inspect(error),
+      )
+  }
+}
+
+fn cleanup_workspace(config: Config, issue: Issue) -> Nil {
+  case
+    workspace.remove(config, issue.identifier, fn(error) {
+      log_issue(
+        issue,
+        "before_remove failed ignored=true reason=" <> string.inspect(error),
+      )
+    })
+  {
+    Ok(_) -> log_issue(issue, "workspace_cleanup completed")
+    Error(error) ->
+      log_issue(
+        issue,
+        "workspace_cleanup failed reason=" <> string.inspect(error),
+      )
+  }
 }

@@ -34,6 +34,7 @@ pub fn new(
   Ok(
     Adapter(
       kind: "file",
+      secret_environment_names: [],
       fetch_by_states: fn(states) {
         use issues <- result.try(read())
         let states = list.map(states, normalize)
@@ -86,13 +87,22 @@ fn read_issues(
       )
     }),
   )
-  json.parse(source, decode.list(issue_decoder()))
-  |> result.map_error(fn(errors) {
-    TrackerError(
-      "tracker_response",
-      "invalid issue snapshot: " <> string.inspect(errors),
-    )
-  })
+  use issues <- result.try(
+    json.parse(source, decode.list(issue_decoder()))
+    |> result.map_error(fn(errors) {
+      TrackerError(
+        "tracker_response",
+        "invalid issue snapshot: " <> string.inspect(errors),
+      )
+    }),
+  )
+  use _ <- result.try(require_unique(issues, fn(issue) { issue.id }, "id"))
+  use _ <- result.try(require_unique(
+    issues,
+    fn(issue) { issue.identifier },
+    "identifier",
+  ))
+  Ok(issues)
 }
 
 fn issue_decoder() -> decode.Decoder(domain.Issue) {
@@ -102,6 +112,14 @@ fn issue_decoder() -> decode.Decoder(domain.Issue) {
     None,
     decode.optional(decode.dynamic),
   )
+  let native_ref = case native_ref {
+    Some(value) ->
+      case decode.run(value, decode.dict(decode.string, decode.dynamic)) {
+        Ok(_) -> Some(value)
+        Error(_) -> None
+      }
+    None -> None
+  }
   use identifier <- decode.field("identifier", non_empty_string())
   use title <- decode.field("title", non_empty_string())
   use description <- decode.optional_field(
@@ -199,5 +217,21 @@ fn parse_time(value: Option(String)) -> Option(Int) {
     None -> None
     Some(value) ->
       runtime.parse_rfc3339(value) |> result.map(Some) |> result.unwrap(None)
+  }
+}
+
+fn require_unique(
+  issues: List(domain.Issue),
+  identity: fn(domain.Issue) -> String,
+  field: String,
+) -> Result(Nil, domain.ServiceError) {
+  let values = list.map(issues, identity)
+  case list.length(values) == list.length(list.unique(values)) {
+    True -> Ok(Nil)
+    False ->
+      Error(TrackerError(
+        "tracker_response",
+        "issue snapshot contains duplicate " <> field,
+      ))
   }
 }
