@@ -5,6 +5,7 @@ import symphony/domain.{type Issue, type ServiceError}
 pub type Adapter {
   Adapter(
     kind: String,
+    secret_environment_names: List(String),
     fetch_by_states: fn(List(String)) -> Result(List(Issue), ServiceError),
     fetch_by_ids: fn(List(String)) -> Result(List(Issue), ServiceError),
   )

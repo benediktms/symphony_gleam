@@ -1,3 +1,4 @@
+import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -93,9 +94,27 @@ pub fn after_run(
   )
 }
 
+pub fn after_run_for_issue(
+  config: Config,
+  identifier: String,
+) -> Result(Nil, domain.ServiceError) {
+  let root = runtime.absolute_path(config.workspace_root)
+  let path = runtime.absolute_path(runtime.join(root, key(identifier)))
+  use _ <- result.try(ensure_contained(root, path))
+  use path_exists <- result.try(exists(path))
+  case path_exists {
+    False -> Ok(Nil)
+    True -> {
+      use _ <- result.try(require_real_directory(path))
+      after_run(config, Workspace(path, key(identifier), False))
+    }
+  }
+}
+
 pub fn remove(
   config: Config,
   identifier: String,
+  on_hook_failure: fn(domain.ServiceError) -> Nil,
 ) -> Result(Nil, domain.ServiceError) {
   let Config(workspace_root: root, hooks:, ..) = config
   let root = runtime.absolute_path(root)
@@ -106,7 +125,10 @@ pub fn remove(
     False -> Ok(Nil)
     True -> {
       use _ <- result.try(require_real_directory(path))
-      let _ = run_fatal_hook(hooks.before_remove, hooks, path, "before_remove")
+      case run_fatal_hook(hooks.before_remove, hooks, path, "before_remove") {
+        Error(error) -> on_hook_failure(error)
+        Ok(_) -> Nil
+      }
       runtime.remove_tree(path) |> result.map_error(WorkspaceError)
     }
   }
@@ -169,11 +191,15 @@ fn run_fatal_hook(
 ) -> Result(Nil, domain.ServiceError) {
   case script {
     None -> Ok(Nil)
-    Some(script) ->
+    Some(script) -> {
+      io.println(
+        "component=symphony hook=" <> name <> " status=started cwd=" <> cwd,
+      )
       runtime.run_hook(script, cwd, hooks.timeout_ms)
       |> result.map(fn(_) { Nil })
       |> result.map_error(fn(reason) {
         WorkspaceError(name <> " failed: " <> reason)
       })
+    }
   }
 }

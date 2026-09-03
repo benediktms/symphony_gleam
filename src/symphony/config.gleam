@@ -173,15 +173,16 @@ fn agent_decoder() -> decode.Decoder(AgentConfig) {
   use per_state <- decode.optional_field(
     "max_concurrent_agents_by_state",
     dict.new(),
-    decode.dict(decode.string, decode.int),
+    decode.dict(decode.string, decode.dynamic),
   )
   let per_state =
     per_state
     |> dict.to_list
     |> list.filter_map(fn(entry) {
-      case entry {
-        #(state, limit) if limit > 0 -> Ok(#(domain.normalize(state), limit))
-        _ -> Error(Nil)
+      case entry, decode.run(entry.1, decode.int) {
+        #(state, _), Ok(limit) if limit > 0 ->
+          Ok(#(domain.normalize(state), limit))
+        _, _ -> Error(Nil)
       }
     })
   decode.success(AgentConfig(max_concurrent, max_turns, max_backoff, per_state))

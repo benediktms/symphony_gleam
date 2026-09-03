@@ -31,6 +31,8 @@ The scheduler depends only on `symphony/tracker.Adapter`, a record containing tw
 
 ```gleam
 Adapter(
+  kind: String,
+  secret_environment_names: List(String),
   fetch_by_states: fn(List(String)) -> Result(List(Issue), ServiceError),
   fetch_by_ids: fn(List(String)) -> Result(List(Issue), ServiceError),
 )
@@ -46,7 +48,8 @@ The initial adapter reads a JSON array from `tracker.provider.path`. It is usefu
 - `tracker.provider.path`: required string; relative paths resolve beside `WORKFLOW.md`; `$VAR` resolves a host environment variable
 - Scope: every record in the file
 - Pagination/rate limits/authentication: none
-- Dispatch identity: JSON `id`; `native_ref` is preserved as non-secret JSON
+- Dispatch identity: JSON `id`; duplicate IDs or identifiers reject the snapshot
+- `native_ref`: preserved only when it is a non-secret JSON object; other values normalize to null
 - Errors: missing/unreadable file -> `tracker_request`; invalid config -> `invalid_tracker_config`; malformed records -> `tracker_response`
 - Tools/writes: none
 
@@ -68,7 +71,7 @@ The optional HTTP/status server, SSH workers, persistent retry state, and provid
 
 Defaults are conservative: approval policy `never`, thread sandbox `workspace-write`, a workspace-write turn policy with network disabled, approval requests declined, and interactive user-input requests failed rather than left hanging. These values can be changed in `WORKFLOW.md` using values supported by the installed Codex app-server. A spec-shaped `turn_sandbox_policy` object is passed through; the string shorthands `workspace-write`, `read-only`, and `danger-full-access` are also accepted.
 
-Tracker adapters must declare and remove any credential environment names before child launch. The built-in file adapter has no credential, so there is nothing to remove. Hooks are trusted repository-owned shell code.
+Tracker adapters declare credential environment names through `secret_environment_names`; Symphony removes them from the Codex child environment. The built-in file adapter has no credential, so it declares an empty list. Hooks are trusted repository-owned shell code.
 
 Protocol implementation was validated against `codex-cli 0.150.1`; regenerate the installed schema and run the tests when targeting another Codex version:
 
@@ -76,4 +79,3 @@ Protocol implementation was validated against `codex-cli 0.150.1`; regenerate th
 codex app-server generate-json-schema --out /tmp/codex-schema
 gleam test
 ```
-
