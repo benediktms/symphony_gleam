@@ -1,0 +1,42 @@
+[
+  {
+    "id": "beholder-graph-ui-research",
+    "native_ref": null,
+    "identifier": "BHL-UI-1",
+    "title": "Research the first Beholder graph UI prototype",
+    "description": "Research the smallest credible implementation path for a Beholder desktop graph prototype. Start from the current repository rather than assuming a new backend. Trace the existing workspace, repository, entity, and relationship query surfaces and identify the exact reusable data boundary. Compare only the few graph renderers that plausibly support SvelteKit inside Tauri, force-directed layout, topology expansion during semantic zoom, animated directional edges, selection highlighting, and large reachable subgraphs. Prefer an existing dependency over custom rendering. Define the prototype data contract, aggregation rules from workspace modules down to files/types/functions, upstream/downstream traversal semantics, a minimal filter set, and a representative workspace for validation. Record a decision-ready recommendation in docs/GRAPH_UI_RESEARCH.md with source references, tradeoffs, known performance ceilings, and an explicit proposed file/module layout. Do not build production UI code in this ticket.",
+    "priority": 1,
+    "state": "Accepted",
+    "branch_name": null,
+    "url": null,
+    "assignee_id": null,
+    "labels": ["symphony", "research", "graph-ui"],
+    "blocked_by": [],
+    "dispatchable": true,
+    "created_at": "2026-08-29T09:45:13Z",
+    "updated_at": "2026-08-29T12:06:03Z"
+  },
+  {
+    "id": "beholder-graph-ui-prototype",
+    "native_ref": null,
+    "identifier": "BHL-UI-2",
+    "title": "Build an interactive Beholder graph UI prototype",
+    "description": "Build the early desktop prototype using Tauri, SvelteKit, and shadcn-svelte, following the accepted recommendation from BHL-UI-1. Open on an aggregated force-directed workspace graph backed by a realistic typed fixture isolated behind the intended Tauri command boundary; do not add a new Beholder backend API in this prototype. Allow filtering down to a repository. Use semantic zoom that expands module nodes into contained files, types, and functions and reconnects the visible topology. Use https://vasturiano.github.io/force-graph/example/highlight/ as the interaction reference: hover highlights a node, its direct neighbours, and incident edges; selection persists an outlined node and emphasized incident links; only emphasized links animate. Selecting an entity must re-root the graph around it and model all upstream and downstream reachable nodes. Give upstream and downstream paths distinct colors and make direction visible with animated dotted edges. Keep the basic filters to repository, relationship kind, tests, and origin. Apply explicit visible-node and visible-link guards from the accepted research, show truncation clearly, and require the user to narrow filters rather than freezing the renderer; the underlying fixture and traversal semantics remain fully reachable. Preserve a clear way to return to the repository and workspace views. State the backend capability needed to replace the fixture. Add the smallest runnable checks for non-trivial graph transformation logic and document how to launch the prototype.",
+    "priority": 2,
+    "state": "Review",
+    "branch_name": null,
+    "url": null,
+    "assignee_id": null,
+    "labels": ["symphony", "prototype", "graph-ui"],
+    "blocked_by": [
+      {
+        "id": "beholder-graph-ui-research",
+        "identifier": "BHL-UI-1",
+        "state": "Accepted"
+      }
+    ],
+    "dispatchable": true,
+    "created_at": "2026-08-29T09:45:13Z",
+    "updated_at": "2026-08-29T12:37:40Z"
+  }
+]
