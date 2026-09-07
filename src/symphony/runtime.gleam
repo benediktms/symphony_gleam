@@ -45,6 +45,9 @@ pub fn run_hook(
 @external(erlang, "runtime_ffi", "now_ms")
 pub fn now_ms() -> Int
 
+@external(erlang, "runtime_ffi", "unix_ms")
+pub fn unix_ms() -> Int
+
 @external(erlang, "runtime_ffi", "parse_rfc3339")
 pub fn parse_rfc3339(value: String) -> Result(Int, Nil)
 

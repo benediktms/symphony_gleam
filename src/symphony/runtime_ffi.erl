@@ -1,7 +1,7 @@
 -module(runtime_ffi).
 -export([parse_yaml/1, absolute_path/1, dirname/1, join/2, home/0, temp_dir/0,
          getenv/1, hash_suffix/1, mkdir/1, is_directory/1, remove_tree/1,
-         run_hook/3, now_ms/0, parse_rfc3339/1, sleep/1,
+         run_hook/3, now_ms/0, unix_ms/0, parse_rfc3339/1, sleep/1,
          start_port/3, port_pid/1, port_send/2, port_read/2, port_stop/1, halt/1]).
 
 parse_yaml(Source) ->
@@ -92,6 +92,8 @@ truncate(Data) when byte_size(Data) > 8192 -> binary:part(Data, byte_size(Data) 
 truncate(Data) -> Data.
 
 now_ms() -> erlang:monotonic_time(millisecond).
+
+unix_ms() -> erlang:system_time(millisecond).
 
 parse_rfc3339(Value) ->
     try calendar:rfc3339_to_system_time(binary_to_list(Value), [{unit, millisecond}]) of
