@@ -255,12 +255,14 @@ fn fetch_pages(
   ))
   let items = list.append(items, page_items)
   case page.page_info {
-    PageInfo(False, _) ->
+    PageInfo(False, _) -> {
+      use _ <- result.try(require_unique_items(items))
       Ok(Snapshot(
         project_id: page.project_id,
         viewer_login: page.viewer_login,
         items:,
       ))
+    }
     PageInfo(True, None) ->
       Error(InvalidPagination("project items hasNextPage without endCursor"))
     PageInfo(True, Some("")) ->

@@ -16,6 +16,7 @@ pub fn main() -> Nil {
   let _ = user_projects_select_only_the_user_root_test()
   let _ = project_item_pagination_requires_a_cursor_test()
   let _ = project_item_pagination_advances_test()
+  let _ = project_item_pagination_rejects_duplicate_items_test()
   let _ = nested_connection_overflow_fails_the_snapshot_test()
   let _ = fetch_by_ids_restores_requested_order_test()
   let _ = fetch_by_ids_limits_batches_to_fifty_test()
@@ -156,6 +157,32 @@ pub fn project_item_pagination_advances_test() {
 
   client.fetch_project_items(github)
   |> should.equal(Ok(client.Snapshot("PROJECT-1", "benediktms", [])))
+}
+
+pub fn project_item_pagination_rejects_duplicate_items_test() {
+  let send = fn(req: request.Request(String)) {
+    let body = case string.contains(req.body, "cursor-1") {
+      True -> project_page("[" <> issue_item("ITEM-1", 1) <> "]", False, "null")
+      False ->
+        project_page(
+          "[" <> issue_item("ITEM-1", 1) <> "]",
+          True,
+          "\"cursor-1\"",
+        )
+    }
+    Ok(Response(200, [], body))
+  }
+  let assert Ok(github) =
+    client.new_with_send(
+      "https://github.com/orgs/freshaengineering/projects/3",
+      "secret",
+      send,
+    )
+
+  client.fetch_project_items(github)
+  |> should.equal(
+    Error(client.InvalidResponse("GitHub returned a duplicate project item")),
+  )
 }
 
 pub fn nested_connection_overflow_fails_the_snapshot_test() {
