@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: erlef/setup-beam@v1.24.1
+        with:
+          otp-version: "29"
+          gleam-version: "1.18.1"
+          version-type: strict
+      - run: gleam format --check src test
+      - run: gleam check
+      - run: gleam test
