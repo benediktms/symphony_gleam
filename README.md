@@ -4,7 +4,7 @@ A Gleam/OTP implementation of the [OpenAI Symphony service specification](https:
 
 ## Run
 
-Requirements: Gleam 1.18+, Erlang/OTP, and an authenticated `codex` executable.
+Requirements: Gleam 1.18+, Erlang/OTP 26+, and an authenticated `codex` executable. OTP 26 is the minimum because older `httpc` versions do not verify TLS by default.
 
 ```sh
 gleam deps download
